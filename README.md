@@ -1,58 +1,215 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+Laravel Deployment on Kubernetes (Minikube)
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Dokumentasi ini berisi panduan teknis lengkap untuk melakukan deployment aplikasi Laravel ke cluster Kubernetes menggunakan Minikube dan Docker Desktop pada sistem operasi Windows.
+Prasyarat
 
-## About Laravel
+Pastikan perangkat lunak berikut telah terinstal:
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+    PHP 8.3 atau versi terbaru
+    Composer
+    Docker Desktop
+    Minikube
+    Kubectl
+    Laragon (opsional, untuk pengujian lokal)
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+1. Setup Proyek Laravel Lokal
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+cd C:\Users\aksal\Documents
+mkdir kubernetes-laravel
+cd kubernetes-laravel
 
-## Learning Laravel
+composer create-project laravel/laravel laravel-minikube
+cd laravel-minikube
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+cp .env.example .env
+php artisan key:generate
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+2. Konfigurasi Environment
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+Edit file .env:
 
-## Agentic Development
+DB_CONNECTION=mysql
+DB_HOST=mysql
+DB_PORT=3306
+DB_DATABASE=laravel_k8s
+DB_USERNAME=root
+DB_PASSWORD=
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+Catatan:
 
-```bash
-composer require laravel/boost --dev
+    DB_HOST=mysql digunakan agar Laravel dapat terhubung ke service MySQL di dalam Kubernetes.
 
-php artisan boost:install
-```
+3. Pengujian Lokal (Laragon)
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Pastikan aplikasi berjalan sebelum masuk ke tahap containerization.
 
-## Contributing
+Langkah:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+    Jalankan Laragon → klik Start All
+    Jalankan migrasi:
 
-## Code of Conduct
+php artisan migrate
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+    Jalankan aplikasi:
 
-## Security Vulnerabilities
+php artisan serve
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+    Akses di browser:
 
-## License
+http://127.0.0.1:8000
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+4. Konfigurasi Dockerfile
+
+Buat file Dockerfile di root project:
+
+FROM php:8.3-apache
+
+RUN docker-php-ext-install pdo pdo_mysql
+RUN a2enmod rewrite
+
+ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
+
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/000-default.conf
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf
+
+COPY --chown=www-data:www-data . /var/www/html
+
+RUN chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+
+EXPOSE 80
+
+5. Inisialisasi Kubernetes (Minikube)
+
+Pastikan Docker Desktop dalam keadaan aktif.
+
+minikube start --driver=docker
+kubectl get nodes
+
+Jika berhasil:
+
+minikube   Ready
+
+6. Setup Kubernetes Manifest
+
+Buat folder:
+
+mkdir k8s
+cd k8s
+
+Buat file:
+
+    laravel.yaml
+    mysql.yaml
+    service.yaml
+
+Deploy:
+
+kubectl apply -f .
+kubectl get pods
+kubectl get svc
+
+7. Build dan Load Image ke Minikube
+
+Kembali ke root project:
+
+cd ..
+docker build -t laravel-app .
+minikube image load laravel-app
+
+Verifikasi:
+
+minikube ssh
+docker images
+
+Pastikan terdapat:
+
+laravel-app   latest
+
+8. Menjalankan Aplikasi
+
+minikube service laravel-nodeport
+
+9. Migrasi Database di Pod
+
+kubectl get pods
+kubectl exec -it <nama-pod-laravel> -- bash
+
+php artisan migrate
+
+10. Update Image
+
+Jika ada perubahan kode:
+
+docker build -t laravel-app .
+minikube image load laravel-app
+minikube service laravel-nodeport
+
+11. Manajemen Skalabilitas
+
+Scale up:
+
+kubectl scale deployment laravel --replicas=5
+
+Scale down:
+
+kubectl scale deployment laravel --replicas=2
+
+Monitoring:
+
+kubectl get pods -w
+
+12. Arsitektur Sistem
+
+User → Service (NodePort) → Laravel Pods (Replicas) → MySQL Pod
+
+Kubernetes menangani:
+
+    Load balancing
+    Service discovery
+    Horizontal scaling
+
+13. Troubleshooting
+
+Hapus deployment:
+
+kubectl delete deployment laravel
+
+Hapus image:
+
+docker rmi laravel-app
+
+Cek image di Minikube:
+
+minikube ssh
+docker images
+
+Restart Minikube:
+
+minikube delete --all --purge
+docker rm -f minikube
+
+14. Reset Total (Clean Environment)
+
+kubectl delete all --all
+
+minikube stop
+minikube delete --all --purge
+
+docker system prune -a --volumes
+docker builder prune -a
+
+rmdir /s /q C:\Users\aksal\.minikube\cache
+
+15. Membersihkan Temporary File Windows
+
+Win + R → %temp% → hapus semua file
+
+Hasil
+
+Dengan langkah ini:
+
+    Laravel berjalan dalam container Docker
+    Deployment di Kubernetes (Minikube)
+    Load balancing melalui Service
+    Skalabilitas menggunakan replicas
+    Simulasi environment production secara lokal
